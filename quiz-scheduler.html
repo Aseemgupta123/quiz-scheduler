@@ -342,6 +342,24 @@ function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
             Click or drag to mark your free 30-min slots, then hit Save
           </div>
         </div>
+        {/* Refresh button */}
+        <button
+          onClick={() => {
+            setLoading(true);
+            setSaveStatus('idle');
+            loadAvailability(dateStr).then(data => { setAvail(data); setLoading(false); });
+          }}
+          disabled={loading || saveStatus === 'saving'}
+          style={{
+            padding: '9px 14px', borderRadius: 8, fontSize: 14, fontWeight: 600,
+            border: '1px solid var(--border)', cursor: 'pointer',
+            background: 'var(--surface)', color: 'var(--text)',
+            opacity: (loading || saveStatus === 'saving') ? 0.4 : 1,
+            transition: 'all 0.2s',
+          }}
+          title="Reload latest data from server"
+        >↻ Refresh</button>
+
         {/* Save button */}
         <button
           onClick={handleSave}

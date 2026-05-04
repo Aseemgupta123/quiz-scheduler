@@ -41,7 +41,7 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const API = 'https://ltxr7rmsql.execute-api.us-east-1.amazonaws.com/prod/availability';
+const API = 'https://4fjivkxpme.execute-api.eu-west-1.amazonaws.com/prod/availability';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const TEAM = ['Rohin', 'Madhavi', 'Satvik', 'Srini', 'Aseem', 'X Factor'];
@@ -75,12 +75,25 @@ async function loadAvailability(dateStr) {
 }
 
 async function saveAvailability(dateStr, data) {
-  const res = await fetch(API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dateStr, availability: data }),
-  });
-  if (!res.ok) throw new Error('Save failed');
+  let res;
+  try {
+    res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dateStr, availability: data }),
+    });
+  } catch (e) {
+    throw new Error(`Network error: ${e.message}`);
+  }
+  const text = await res.text();
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+  // API gateway non-proxy wraps errors in a 200 with statusCode in body
+  try {
+    const json = JSON.parse(text);
+    if (json.statusCode && json.statusCode !== 200) throw new Error(`Lambda ${json.statusCode}: ${json.body}`);
+  } catch (e) {
+    if (e.message.startsWith('Lambda')) throw e;
+  }
   try { localStorage.setItem(cacheKey(dateStr), JSON.stringify(data)); } catch {}
 }
 
@@ -245,6 +258,7 @@ function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
   const [avail, setAvail] = useState({});
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
+  const [saveError, setSaveError] = useState('');
   const [dragging, setDragging] = useState(false);
   const [dragMode, setDragMode] = useState('add');
   const saveTimerRef = useRef(null);
@@ -288,13 +302,15 @@ function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
 
   const handleSave = async () => {
     setSaveStatus('saving');
+    setSaveError('');
     clearTimeout(saveTimerRef.current);
     try {
       await saveAvailability(dateStr, avail);
       setSaveStatus('saved');
       saveTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
-    } catch {
+    } catch (e) {
       setSaveStatus('error');
+      setSaveError(e.message || String(e));
     }
   };
 
@@ -368,6 +384,17 @@ function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
           ))}
         </div>
       </div>
+
+      {/* Save error detail */}
+      {saveStatus === 'error' && saveError && (
+        <div style={{
+          marginBottom: 12, padding: '8px 14px',
+          background: 'oklch(0.60 0.18 25 / 0.1)', border: '1px solid oklch(0.60 0.18 25 / 0.4)',
+          borderRadius: 8, fontSize: 12, color: 'var(--red)', wordBreak: 'break-all',
+        }}>
+          <strong>Save error:</strong> {saveError}
+        </div>
+      )}
 
       {/* Unsaved warning */}
       {saveStatus === 'idle' && !loading && Object.values(avail).some(a => a.length > 0) && (

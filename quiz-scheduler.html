@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Quiz Night Scheduler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: oklch(0.12 0.01 250);
+    --surface: oklch(0.17 0.01 250);
+    --surface2: oklch(0.21 0.012 250);
+    --border: oklch(0.28 0.01 250);
+    --text: oklch(0.93 0.005 250);
+    --text-muted: oklch(0.55 0.01 250);
+    --amber: oklch(0.75 0.15 85);
+    --amber-dim: oklch(0.75 0.15 85 / 0.15);
+    --green: oklch(0.70 0.15 145);
+    --slot0: oklch(0.20 0.01 250);
+    --slot1: oklch(0.28 0.08 145);
+    --slot2: oklch(0.38 0.10 145);
+    --slot3: oklch(0.48 0.12 145);
+    --slot4: oklch(0.57 0.13 145);
+    --slot5: oklch(0.65 0.14 145);
+    --slot6: oklch(0.72 0.15 145);
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  #root { min-height: 100vh; }
+  button { cursor: pointer; font-family: inherit; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const { useState, useEffect, useCallback, useMemo } = React;
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const TEAM = ['Rohin', 'Madhavi', 'Satvik', 'Srini', 'Aseem', 'X Factor'];
+const INITIALS = { Rohin:'RO', Madhavi:'MA', Satvik:'SA', Srini:'SR', Aseem:'AS', 'X Factor':'XF' };
+const COLORS = {
+  Rohin:    'oklch(0.70 0.15 30)',
+  Madhavi:  'oklch(0.70 0.15 290)',
+  Satvik:   'oklch(0.70 0.15 200)',
+  Srini:    'oklch(0.70 0.15 60)',
+  Aseem:    'oklch(0.70 0.15 330)',
+  'X Factor': 'oklch(0.70 0.15 170)',
+};
+// 0, 0.5, 1, 1.5, ... 23.5 — 48 half-hour slots
+const SLOTS = Array.from({length: 48}, (_, i) => i * 0.5);
+
+// ── Timezone helpers ───────────────────────────────────────────────────────
+function getUKOffset(dateStr) {
+  // Accurate BST detection: last Sunday of March → last Sunday of October
+  const year = parseInt(dateStr.slice(0, 4));
+  const march31 = new Date(year, 2, 31);
+  const lastSunMarch = new Date(year, 2, 31 - march31.getDay());
+  const oct31 = new Date(year, 9, 31);
+  const lastSunOct = new Date(year, 9, 31 - oct31.getDay());
+  const d = new Date(dateStr + 'T12:00:00');
+  return (d >= lastSunMarch && d < lastSunOct) ? 1 : 0;
+}
+
+function istToUK(slot, dateStr) {
+  // IST = UTC+5:30 → subtract 5.5h for UTC → add UK offset
+  const ukOff = getUKOffset(dateStr);
+  let ukSlot = slot - 5.5 + ukOff;
+  return ((ukSlot % 24) + 24) % 24;
+}
+
+function formatSlot(s) {
+  const hh = Math.floor(s);
+  const mm = s % 1 === 0.5 ? '30' : '00';
+  return `${String(hh).padStart(2,'0')}:${mm}`;
+}
+
+// ── Storage (localStorage mock → swap for API) ─────────────────────────────
+function storageKey(dateStr) { return `quiz_avail_${dateStr}`; }
+
+function loadAvailability(dateStr) {
+  try {
+    const raw = localStorage.getItem(storageKey(dateStr));
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveAvailability(dateStr, data) {
+  try {
+    localStorage.setItem(storageKey(dateStr), JSON.stringify(data));
+  } catch {}
+}
+
+// ── Date helpers ───────────────────────────────────────────────────────────
+function getNext20Days() {
+  const days = [];
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  for (let i = 0; i < 20; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+function formatDateLabel(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function formatDayFull(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function isToday(dateStr) {
+  return dateStr === new Date().toISOString().slice(0, 10);
+}
+
+// ── Components ─────────────────────────────────────────────────────────────
+
+function Avatar({ name, size = 28, active = false }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      background: active ? COLORS[name] : 'var(--surface2)',
+      color: active ? 'oklch(0.10 0.01 250)' : 'var(--text-muted)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.38, fontWeight: 700, letterSpacing: '-0.02em',
+      border: active ? `2px solid ${COLORS[name]}` : '2px solid var(--border)',
+      flexShrink: 0, transition: 'all 0.15s',
+      userSelect: 'none',
+    }}>{INITIALS[name]}</div>
+  );
+}
+
+// Calendar overview
+function CalendarView({ dates, allData, onSelectDate, selectedDate }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {dates.map(dateStr => {
+        const dayData = allData[dateStr] || {};
+        const hourCounts = {};
+        TEAM.forEach(p => {
+          (dayData[p] || []).forEach(h => {
+            hourCounts[h] = (hourCounts[h] || 0) + 1;
+          });
+        });
+        const maxOverlap = Math.max(0, ...Object.values(hourCounts));
+        const anyData = Object.values(dayData).some(arr => arr.length > 0);
+        const isSelected = selectedDate === dateStr;
+
+        return (
+          <button
+            key={dateStr}
+            onClick={() => onSelectDate(dateStr)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 16,
+              background: isSelected ? 'var(--amber-dim)' : 'var(--surface)',
+              border: isSelected ? '1px solid var(--amber)' : '1px solid var(--border)',
+              borderRadius: 12, padding: '14px 18px',
+              textAlign: 'left', color: 'var(--text)', cursor: 'pointer',
+              transition: 'all 0.15s', width: '100%',
+            }}
+          >
+            {/* Day label */}
+            <div style={{ minWidth: 110 }}>
+              <div style={{
+                fontSize: 15, fontWeight: isToday(dateStr) ? 700 : 500,
+                color: isToday(dateStr) ? 'var(--amber)' : 'var(--text)',
+              }}>
+                {isToday(dateStr) ? '★ Today' : formatDateLabel(dateStr).split(',')[0]}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+                {formatDateLabel(dateStr).replace(/^\w+,?\s*/,'')}
+              </div>
+            </div>
+
+            {/* Mini heatmap — 48 half-hour blocks, colour-coded by overlap */}
+            <div style={{ flex: 1, display: 'flex', gap: 1, alignItems: 'center', height: 24 }}>
+              {SLOTS.map(s => {
+                const c = hourCounts[s] || 0;
+                const bg = c >= 4
+                  ? 'oklch(0.62 0.18 145)'
+                  : c === 3
+                  ? 'oklch(0.75 0.15 85)'
+                  : c === 2
+                  ? 'oklch(0.60 0.18 25)'
+                  : 'var(--surface2)';
+                return (
+                  <div key={s} style={{
+                    flex: 1, height: '100%', borderRadius: 2,
+                    background: bg,
+                    opacity: c === 0 ? 1 : c === 1 ? 0.25 : 1,
+                  }} title={`${formatSlot(s)}: ${c} free`} />
+                );
+              })}
+            </div>
+
+            {/* Overlap badge */}
+            <div style={{ minWidth: 90, textAlign: 'right' }}>
+              {!anyData ? (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No data yet</span>
+              ) : maxOverlap >= 4 ? (
+                <span style={{
+                  fontSize: 12, fontWeight: 600,
+                  color: 'oklch(0.62 0.18 145)', background: 'oklch(0.62 0.18 145 / 0.12)',
+                  padding: '3px 8px', borderRadius: 6,
+                }}>✓ {maxOverlap}/6 free</span>
+              ) : maxOverlap === 3 ? (
+                <span style={{
+                  fontSize: 12, fontWeight: 600,
+                  color: 'var(--amber)', background: 'oklch(0.75 0.15 85 / 0.12)',
+                  padding: '3px 8px', borderRadius: 6,
+                }}>◑ 3/6 free</span>
+              ) : maxOverlap === 2 ? (
+                <span style={{
+                  fontSize: 12, fontWeight: 600,
+                  color: 'oklch(0.60 0.18 25)', background: 'oklch(0.60 0.18 25 / 0.12)',
+                  padding: '3px 8px', borderRadius: 6,
+                }}>◔ 2/6 free</span>
+              ) : (
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>
+                  max {maxOverlap}/6
+                </span>
+              )}
+            </div>
+
+            <div style={{ color: 'var(--text-muted)', fontSize: 18 }}>›</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Day detail view
+function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
+  const [avail, setAvail] = useState(() => loadAvailability(dateStr));
+  const [dragging, setDragging] = useState(false);
+  const [dragStart, setDragStart] = useState(null);
+  const [dragMode, setDragMode] = useState('add');
+  const ukOffset = getUKOffset(dateStr);
+  const ukLabel = ukOffset === 1 ? 'BST' : 'GMT';
+
+  useEffect(() => {
+    setAvail(loadAvailability(dateStr));
+  }, [dateStr]);
+
+  const mySlots = useMemo(() => new Set(avail[currentUser] || []), [avail, currentUser]);
+
+  const handleMouseDown = (s) => {
+    const mode = mySlots.has(s) ? 'remove' : 'add';
+    setDragMode(mode);
+    setDragging(true);
+    setDragStart(s);
+    toggleSlotWithMode(s, mode);
+  };
+
+  const toggleSlotWithMode = (s, mode) => {
+    setAvail(prev => {
+      const mine = new Set(prev[currentUser] || []);
+      if (mode === 'add') mine.add(s);
+      else mine.delete(s);
+      const next = { ...prev, [currentUser]: Array.from(mine).sort((a,b) => a-b) };
+      saveAvailability(dateStr, next);
+      return next;
+    });
+  };
+
+  const handleMouseEnter = (s) => {
+    if (dragging) toggleSlotWithMode(s, dragMode);
+  };
+
+  const handleMouseUp = () => setDragging(false);
+
+  useEffect(() => {
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  const slotCounts = useMemo(() => {
+    const counts = {};
+    TEAM.forEach(p => {
+      (avail[p] || []).forEach(s => {
+        counts[s] = (counts[s] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [avail]);
+
+  const slotMembers = useMemo(() => {
+    const mem = {};
+    TEAM.forEach(p => {
+      (avail[p] || []).forEach(s => {
+        if (!mem[s]) mem[s] = [];
+        mem[s].push(p);
+      });
+    });
+    return mem;
+  }, [avail]);
+
+  return (
+    <div onMouseLeave={() => setDragging(false)}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+        <button onClick={onBack} style={{
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 8, padding: '8px 14px', color: 'var(--text)',
+          fontSize: 14, display: 'flex', alignItems: 'center', gap: 6,
+        }}>‹ Back</button>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{formatDayFull(dateStr)}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+            Click or drag to mark your free 30-min slots
+          </div>
+        </div>
+      </div>
+
+      {/* Person selector */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          I am…
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {TEAM.map(p => (
+            <button key={p} onClick={() => onChangeUser(p)} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: currentUser === p ? 'var(--amber-dim)' : 'var(--surface)',
+              border: currentUser === p ? '1px solid var(--amber)' : '1px solid var(--border)',
+              borderRadius: 8, padding: '7px 14px',
+              color: currentUser === p ? 'var(--amber)' : 'var(--text)',
+              fontSize: 14, fontWeight: currentUser === p ? 600 : 400,
+              transition: 'all 0.15s',
+            }}>
+              <Avatar name={p} size={22} active={currentUser === p} />
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div style={{
+        background: 'var(--surface)', borderRadius: 14,
+        border: '1px solid var(--border)', overflow: 'hidden',
+      }}>
+        {/* Column headers */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '100px 100px 1fr 54px',
+          padding: '10px 16px',
+          borderBottom: '1px solid var(--border)',
+          fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: 'var(--text-muted)',
+          gap: 0,
+        }}>
+          <div>IST</div>
+          <div>{ukLabel}</div>
+          <div>Availability</div>
+          <div style={{ textAlign: 'right' }}>Count</div>
+        </div>
+
+        {/* 48 half-hour rows */}
+        {SLOTS.map((s, idx) => {
+          const ukS = istToUK(s, dateStr);
+          const count = slotCounts[s] || 0;
+          const members = slotMembers[s] || [];
+          const isMeFree = mySlots.has(s);
+          const isAllFree = count === 6;
+          const bgAlpha = count === 0 ? 0 : 0.07 + (count / 6) * 0.55;
+          const isHourBoundary = s % 1 === 0;
+          const isMidnight = s === 0;
+          const isNoon = s === 12;
+          const isLastSlot = idx === SLOTS.length - 1;
+
+          return (
+            <div
+              key={s}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '100px 100px 1fr 54px',
+                padding: '0 16px',
+                borderBottom: isLastSlot
+                  ? 'none'
+                  : isHourBoundary && !isMidnight && SLOTS[idx+1] !== undefined
+                  ? '1px solid var(--border)'
+                  : '1px dashed oklch(0.28 0.01 250 / 0.5)',
+                borderTop: isNoon ? '2px solid var(--border)' : undefined,
+                minHeight: 34,
+                alignItems: 'center',
+                background: count > 0 ? `oklch(0.60 0.15 145 / ${bgAlpha})` : 'transparent',
+                transition: 'background 0.1s',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              onMouseDown={() => handleMouseDown(s)}
+              onMouseEnter={() => handleMouseEnter(s)}
+            >
+              {/* IST */}
+              <div style={{
+                fontSize: isHourBoundary ? 13 : 11,
+                fontWeight: isHourBoundary ? 600 : 400,
+                color: isMeFree ? 'var(--amber)' : isHourBoundary ? 'var(--text)' : 'var(--text-muted)',
+                opacity: isHourBoundary ? 1 : 0.7,
+              }}>
+                {formatSlot(s)}
+                <span style={{ fontSize: 10, marginLeft: 3, opacity: 0.55 }}>IST</span>
+              </div>
+
+              {/* UK time */}
+              <div style={{ fontSize: isHourBoundary ? 12 : 11, color: 'var(--text-muted)', opacity: isHourBoundary ? 1 : 0.7 }}>
+                {formatSlot(((ukS % 24) + 24) % 24)}
+                <span style={{ fontSize: 10, marginLeft: 3, opacity: 0.55 }}>{ukLabel}</span>
+              </div>
+
+              {/* Avatars */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                {isMeFree && (
+                  <div style={{
+                    width: 5, height: 5, borderRadius: '50%',
+                    background: 'var(--amber)', flexShrink: 0,
+                    boxShadow: '0 0 5px var(--amber)',
+                  }} />
+                )}
+                {members.length > 0 && (
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {members.map(p => (
+                      <div key={p} title={p} style={{
+                        width: 18, height: 18, borderRadius: '50%',
+                        background: COLORS[p],
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 8, fontWeight: 700,
+                        color: 'oklch(0.10 0.01 250)',
+                      }}>{INITIALS[p]}</div>
+                    ))}
+                  </div>
+                )}
+                {isAllFree && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: 'var(--green)',
+                    background: 'oklch(0.70 0.15 145 / 0.15)',
+                    padding: '1px 6px', borderRadius: 4, marginLeft: 3,
+                  }}>✓ all free!</span>
+                )}
+              </div>
+
+              {/* Count */}
+              <div style={{
+                textAlign: 'right',
+                fontSize: 12, fontWeight: 700,
+                color: count === 0 ? 'var(--border)' : count === 6 ? 'var(--green)' : 'var(--text-muted)',
+              }}>
+                {count > 0 ? `${count}/6` : ''}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div style={{
+        marginTop: 20, display: 'flex', alignItems: 'center', gap: 16,
+        fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 2 }}>
+            {[0,1,2,3,4,5,6].map(c => (
+              <div key={c} style={{
+                width: 14, height: 14, borderRadius: 3,
+                background: c === 0 ? 'var(--surface2)' : `oklch(0.60 0.15 145 / ${0.07 + (c/6)*0.55})`,
+              }} />
+            ))}
+          </div>
+          <span>0 → 6 people free</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)', boxShadow: '0 0 6px var(--amber)' }} />
+          <span>Your selected slots</span>
+        </div>
+        <div style={{ marginLeft: 'auto', fontSize: 11 }}>
+          Drag across rows to select multiple slots at once
+        </div>
+      </div>
+
+      {/* Best times panel */}
+      <BestTimesPanel avail={avail} dateStr={dateStr} ukLabel={ukLabel} slotCounts={slotCounts} />
+    </div>
+  );
+}
+
+function BestTimesPanel({ avail, dateStr, ukLabel, slotCounts }) {
+  const counts = slotCounts || useMemo(() => {
+    const c = {};
+    TEAM.forEach(p => { (avail[p] || []).forEach(s => { c[s] = (c[s] || 0) + 1; }); });
+    return c;
+  }, [avail]);
+
+  const sorted = Object.entries(counts)
+    .map(([s, c]) => [Number(s), c])
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, 6);
+
+  if (sorted.length === 0) return null;
+
+  return (
+    <div style={{
+      marginTop: 24,
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 14, padding: '18px 20px',
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 14 }}>
+        Best windows so far
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {sorted.map(([s, c]) => {
+          const ukS = ((istToUK(s, dateStr) % 24) + 24) % 24;
+          return (
+            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ minWidth: 155, fontSize: 13, fontWeight: 600 }}>
+                {formatSlot(s)} IST
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
+                  / {formatSlot(ukS)} {ukLabel}
+                </span>
+              </div>
+              <div style={{ flex: 1, height: 7, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', width: `${(c/6)*100}%`,
+                  background: c === 6 ? 'var(--green)' : 'var(--amber)',
+                  borderRadius: 4, transition: 'width 0.3s',
+                }} />
+              </div>
+              <div style={{
+                fontSize: 13, fontWeight: 700, minWidth: 36,
+                color: c === 6 ? 'var(--green)' : 'var(--amber)',
+              }}>{c}/6</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────────────────────
+function App() {
+  const dates = useMemo(() => getNext20Days(), []);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [currentUser, setCurrentUser] = useState('Rohin');
+  const [allData, setAllData] = useState({});
+
+  useEffect(() => {
+    const data = {};
+    dates.forEach(d => { data[d] = loadAvailability(d); });
+    setAllData(data);
+  }, [selectedDate]);
+
+  const handleSelectDate = (dateStr) => setSelectedDate(dateStr);
+
+  const handleBack = () => {
+    setSelectedDate(null);
+    const data = {};
+    dates.forEach(d => { data[d] = loadAvailability(d); });
+    setAllData(data);
+  };
+
+  return (
+    <div style={{
+      maxWidth: 780, margin: '0 auto', padding: '40px 24px 80px',
+      minHeight: '100vh',
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: 36 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <div style={{
+            width: 36, height: 36,
+            background: 'var(--amber)', borderRadius: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18,
+          }}>🎯</div>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>
+              Quiz Scheduler
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 1 }}>
+              IST &amp; {dates[0] ? (getUKOffset(dates[0]) === 1 ? 'BST' : 'GMT') : 'UK'} · 20-day rolling calendar
+            </div>
+          </div>
+        </div>
+
+        {/* Team pills */}
+        {!selectedDate && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Team:</span>
+            {TEAM.map(p => (
+              <div key={p} style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 20, padding: '4px 10px 4px 6px', fontSize: 13,
+              }}>
+                <Avatar name={p} size={20} active />
+                {p}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      {selectedDate ? (
+        <DayView
+          dateStr={selectedDate}
+          onBack={handleBack}
+          currentUser={currentUser}
+          onChangeUser={setCurrentUser}
+        />
+      ) : (
+        <>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Select a day to enter your availability
+          </div>
+
+          {/* Colour legend */}
+          <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            {[
+              { color: 'oklch(0.62 0.18 145)', label: '4–6 free' },
+              { color: 'oklch(0.75 0.15 85)',  label: '3 free' },
+              { color: 'oklch(0.60 0.18 25)',  label: '2 free' },
+              { color: 'var(--surface2)',      label: '0–1 free' },
+            ].map(({ color, label }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                <div style={{ width: 12, height: 12, borderRadius: 3, background: color, border: '1px solid var(--border)' }} />
+                {label}
+              </div>
+            ))}
+          </div>
+
+          <CalendarView
+            dates={dates}
+            allData={allData}
+            onSelectDate={handleSelectDate}
+            selectedDate={selectedDate}
+          />
+
+          <div style={{ marginTop: 24, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--text)' }}>How to use:</strong> Click a date, choose your name, then click or drag across the 30-min slots when you're free. Changes save instantly in your browser. Share this page with everyone on the team!
+          </div>
+          <div style={{
+            marginTop: 12, padding: '12px 16px',
+            background: 'oklch(0.75 0.15 85 / 0.08)',
+            border: '1px solid oklch(0.75 0.15 85 / 0.25)',
+            borderRadius: 10, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6,
+          }}>
+            ⚡ <strong style={{ color: 'var(--amber)' }}>Note:</strong> Availability is stored in your browser (localStorage). To sync across devices, connect an AWS Lambda / DynamoDB endpoint — swap the <code style={{fontSize:11, background:'var(--surface2)', padding:'1px 4px', borderRadius:3}}>loadAvailability</code> / <code style={{fontSize:11, background:'var(--surface2)', padding:'1px 4px', borderRadius:3}}>saveAvailability</code> functions in the source.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+</script>
+</body>
+</html>

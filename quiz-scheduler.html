@@ -45,14 +45,15 @@ const { useState, useEffect, useMemo, useRef } = React;
 const API = 'https://4fjivkxpme.execute-api.eu-west-1.amazonaws.com/prod/availability';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const TEAM = ['Rohin', 'Madhavi', 'Satvik', 'Srini', 'Aseem', 'X Factor'];
-const INITIALS = { Rohin:'RO', Madhavi:'MA', Satvik:'SA', Srini:'SR', Aseem:'AS', 'X Factor':'XF' };
+const TEAM = ['Rohin', 'Madhavi', 'Satvik', 'Srini', 'Aseem', 'Iyer', 'X Factor'];
+const INITIALS = { Rohin:'RO', Madhavi:'MA', Satvik:'SA', Srini:'SR', Aseem:'AS', Iyer:'IY', 'X Factor':'XF' };
 const COLORS = {
   Rohin:      'oklch(0.70 0.15 30)',
   Madhavi:    'oklch(0.70 0.15 290)',
   Satvik:     'oklch(0.70 0.15 200)',
   Srini:      'oklch(0.70 0.15 60)',
   Aseem:      'oklch(0.70 0.15 330)',
+  Iyer:       'oklch(0.70 0.15 120)',
   'X Factor': 'oklch(0.70 0.15 170)',
 };
 const SLOTS = Array.from({length: 48}, (_, i) => i * 0.5);
@@ -231,18 +232,18 @@ function CalendarView({ dates, allData, loading, onSelectDate }) {
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No data yet</span>
               ) : maxOverlap >= 4 ? (
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'oklch(0.62 0.18 145)', background: 'oklch(0.62 0.18 145 / 0.12)', padding: '3px 8px', borderRadius: 6 }}>
-                  ✓ {maxOverlap}/6 free
+                  ✓ {maxOverlap}/{TEAM.length} free
                 </span>
               ) : maxOverlap === 3 ? (
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--amber)', background: 'oklch(0.75 0.15 85 / 0.12)', padding: '3px 8px', borderRadius: 6 }}>
-                  ◑ 3/6 free
+                  ◑ 3/{TEAM.length} free
                 </span>
               ) : maxOverlap === 2 ? (
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)', background: 'oklch(0.60 0.18 25 / 0.12)', padding: '3px 8px', borderRadius: 6 }}>
-                  ◔ 2/6 free
+                  ◔ 2/{TEAM.length} free
                 </span>
               ) : (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>max {maxOverlap}/6</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>max {maxOverlap}/{TEAM.length}</span>
               )}
             </div>
 
@@ -449,8 +450,8 @@ function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
           const count = slotCounts[s] || 0;
           const members = slotMembers[s] || [];
           const isMeFree = mySlots.has(s);
-          const isAllFree = count === 6;
-          const bgAlpha = count === 0 ? 0 : 0.07 + (count / 6) * 0.55;
+          const isAllFree = count === TEAM.length;
+          const bgAlpha = count === 0 ? 0 : 0.07 + (count / TEAM.length) * 0.55;
           const isHour = s % 1 === 0;
           const isNoon = s === 12;
           const isLast = idx === SLOTS.length - 1;
@@ -506,8 +507,8 @@ function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
                 )}
               </div>
 
-              <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: count === 0 ? 'var(--border)' : count === 6 ? 'var(--green)' : 'var(--text-muted)' }}>
-                {count > 0 ? `${count}/6` : ''}
+              <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: count === 0 ? 'var(--border)' : count === TEAM.length ? 'var(--green)' : 'var(--text-muted)' }}>
+                {count > 0 ? `${count}/${TEAM.length}` : ''}
               </div>
             </div>
           );
@@ -518,8 +519,8 @@ function DayView({ dateStr, onBack, currentUser, onChangeUser }) {
       <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{ display: 'flex', gap: 2 }}>
-            {[0,1,2,3,4,5,6].map(c => (
-              <div key={c} style={{ width: 14, height: 14, borderRadius: 3, background: c === 0 ? 'var(--surface2)' : `oklch(0.60 0.15 145 / ${0.07 + (c/6)*0.55})` }} />
+            {Array.from({length: TEAM.length + 1}, (_, c) => (
+              <div key={c} style={{ width: 14, height: 14, borderRadius: 3, background: c === 0 ? 'var(--surface2)' : `oklch(0.60 0.15 145 / ${0.07 + (c/TEAM.length)*0.55})` }} />
             ))}
           </div>
           <span>0 → 6 people free</span>
@@ -560,9 +561,9 @@ function BestTimesPanel({ avail, dateStr, ukLabel, slotCounts }) {
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>/ {formatSlot(ukS)} {ukLabel}</span>
               </div>
               <div style={{ flex: 1, height: 7, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${(c/6)*100}%`, background: c === 6 ? 'var(--green)' : 'var(--amber)', borderRadius: 4, transition: 'width 0.3s' }} />
+                <div style={{ height: '100%', width: `${(c/TEAM.length)*100}%`, background: c === TEAM.length ? 'var(--green)' : 'var(--amber)', borderRadius: 4, transition: 'width 0.3s' }} />
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, minWidth: 36, color: c === 6 ? 'var(--green)' : 'var(--amber)' }}>{c}/6</div>
+              <div style={{ fontSize: 13, fontWeight: 700, minWidth: 36, color: c === TEAM.length ? 'var(--green)' : 'var(--amber)' }}>{c}/{TEAM.length}</div>
             </div>
           );
         })}
